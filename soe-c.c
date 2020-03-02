@@ -8,19 +8,20 @@
 
 // トークンの種類
 typedef enum {
-    TK_RESERVED, // 記号
-    TK_NUM,      // 整数トークン
-    TK_EOF,      // 入力の終わりを表すトークン
+    TK_RESERVED,  // 記号
+    TK_NUM,  // 整数トークン
+    TK_EOF,  // 入力の終わりを表すトークン
 } TokenKind;
 
 typedef struct Token Token;
 
 // トークン型
 struct Token {
-    TokenKind kind; // トークンの型
-    Token *next;    // 次の入力トークン
-     int val;        // kindがTK_NUMの場合、その数値
-    char *str;      // トークン文字列
+    TokenKind kind;  // トークンの型
+    Token *next;  // 次の入力トークン
+    int val;  // kindがTK_NUMの場合、その数値
+    char *str;  // トークン文字列
+    int len;  // トークンの長さ
 };
 
 // 現在着目しているトークン
@@ -51,19 +52,25 @@ void error(char *fmt, ...) {
     exit(1);
 }
 // 次のトークンが期待している記号のときには、トークンを1つ読み進めて
-// 真を返す。それ以外の場合には偽を返す。
-bool consume(char op) {
-    if (token->kind != TK_RESERVED || token->str[0] != op)
+// 真を返す。それ以外の場合には読み進めることなく偽を返す。
+bool consume(char *op) {
+    if (token->kind != TK_RESERVED || 
+            strlen(op) != token->len ||
+            memcmp(token->str, op, token->len)) {
         return false;
+        }
     token = token->next;
     return true;
 }
 
 // 次のトークンが期待している記号のときには、トークンを1つ読み進める。
 // それ以外の場合にはエラーを報告する。
-void expect(char op) {
-    if (token->kind != TK_RESERVED || token->str[0] != op)
+void expect(char *op) {
+    if (token->kind != TK_RESERVED ||
+            strlen(op) != token->len ||
+            memcmp(token->str, op, token->len)){
         error_at(token->str, "'%c'ではありません", op);
+        }
     token = token->next;
 }
 
@@ -82,12 +89,17 @@ bool at_eof() {
 }
 
 // 新しいトークンを作成してcurに繋げる
-Token *new_token(TokenKind kind, Token *cur, char *str) {
+Token *new_token(TokenKind kind, Token *cur, char *str, int len) {
     Token *tok = calloc(1, sizeof(Token));
     tok->kind = kind;
     tok->str = str;
+    tok->len = len;
     cur->next = tok;
     return tok;
+}
+
+bool startswith(char *p, char *q) {
+    return memcmp(p, q, strlen(q)) == 0;
 }
 
 // 入力文字列pをトークナイズしてそれを返す
@@ -99,25 +111,37 @@ Token *tokenize(char *p) {
     while (*p) {
         // 空白文字をスキップ
         if (isspace(*p)) {
-        p++;
-        continue;
+            p++;
+            continue;
         }
-
-        if (strchr("+-*/()", *p)) {
-            cur = new_token(TK_RESERVED, cur, p++);
+        // 2文字の演算子を読む
+        if (startswith(p, "==") || 
+                startswith(p, "!=") ||
+                startswith(p, "<=") || 
+                startswith(p, ">=")){
+            cur = new_token(TK_RESERVED, cur, p, 2);
+            p += 2;
+            continue;
+        }
+        
+        // 1文字の演算子を読む
+        if (strchr("+-*/()<>", *p)) {
+            cur = new_token(TK_RESERVED, cur, p++, 1);
             continue;
         }
 
         if (isdigit(*p)) {
-        cur = new_token(TK_NUM, cur, p);
-        cur->val = strtol(p, &p, 10);
-        continue;
+            cur = new_token(TK_NUM, cur, p, 0);
+            char *q = p;
+            cur->val = strtol(p, &p, 10);
+            cur->len = p - q;
+            continue;
         }
 
         error_at(*p, "数字ではありません");
     }
 
-    new_token(TK_EOF, cur, p);
+    new_token(TK_EOF, cur, p, 0);
     return head.next;
 }
 
@@ -127,7 +151,11 @@ typedef enum {
     ND_SUB,  // -
     ND_MUL,  // *
     ND_DIV,  // /
-    ND_NUM,  // 整数 
+    ND_EQ,  // ==
+    ND_NE,  // !=
+    ND_LT,  // <
+    ND_LE,  // <=
+    ND_NUM,  // 整数
 } NodeKind;
 
 typedef struct Node Node;
@@ -157,18 +185,24 @@ Node *new_node_num(int val) {
 }
 
 Node *expr();
+Node *add();
 Node *mul();
 Node *primary();
 Node *unary();
 
-// 加減算
+// 木のはじまり
 Node *expr() {
+    return add();
+}
+
+// 加減算
+Node *add(){
     Node *node = mul();
 
     for(;;) {
-        if (consume('+')) {
+        if (consume("+")) {
             node = new_node(ND_ADD, node, mul());
-        } else if (consume('-')) {
+        } else if (consume("-")) {
             node = new_node(ND_SUB, node ,mul());
         } else {
             return node;
@@ -181,9 +215,9 @@ Node *mul() {
     Node *node = unary();
 
     for(;;) {
-        if (consume('*')) {
+        if (consume("*")) {
             node = new_node(ND_MUL, node, unary());
-        } else if (consume('/')) {
+        } else if (consume("/")) {
             node = new_node(ND_DIV, node ,unary());
         } else {
             return node;
@@ -193,10 +227,10 @@ Node *mul() {
 
 // 単項+/-
 Node *unary(){
-    if (consume('+')) {
+    if (consume("+")) {
         return primary();
     }
-    if (consume('-')) {
+    if (consume("-")) {
         return new_node(ND_SUB, new_node_num(0), primary());
     }
     return primary();
@@ -204,9 +238,9 @@ Node *unary(){
 
 // 括弧
 Node *primary() {
-    if (consume('(')) {
+    if (consume("(")) {
         Node *node = expr();
-        expect(')');
+        expect(")");
         return node;
     }
 
