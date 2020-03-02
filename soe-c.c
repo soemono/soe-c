@@ -185,6 +185,8 @@ Node *new_node_num(int val) {
 }
 
 Node *expr();
+Node *equality();
+Node *relational();
 Node *add();
 Node *mul();
 Node *primary();
@@ -192,14 +194,46 @@ Node *unary();
 
 // 木のはじまり
 Node *expr() {
-    return add();
+    return equality();
+}
+
+Node *equality() {
+    Node *node = relational();
+
+    for (;;) {
+        if (consume("==")) {
+            node = new_node(ND_EQ, node, relational());
+        } else if (consume("!=")) {
+            node = new_node(ND_NE, node, relational());
+        } else {
+            return node;
+        }
+    }
+}
+
+Node *relational() {
+    Node *node = add();
+
+    for (;;) {
+        if (consume("<=")) {
+            node = new_node(ND_LE, node, add());
+        } else if (consume(">=")) {
+            node = new_node(ND_LE, add(), node);
+        } else if (consume("<")) {
+            node = new_node(ND_LT, node, add());
+        } else if (consume(">")) {
+            node = new_node(ND_LT, add(), node);
+        } else {
+            return node;
+        }
+    }
 }
 
 // 加減算
-Node *add(){
+Node *add() {
     Node *node = mul();
 
-    for(;;) {
+    for (;;) {
         if (consume("+")) {
             node = new_node(ND_ADD, node, mul());
         } else if (consume("-")) {
@@ -214,7 +248,7 @@ Node *add(){
 Node *mul() {
     Node *node = unary();
 
-    for(;;) {
+    for (;;) {
         if (consume("*")) {
             node = new_node(ND_MUL, node, unary());
         } else if (consume("/")) {
@@ -275,6 +309,26 @@ void gen(Node *node) {
             printf("  idiv rdi\n");  
             // idiv命令はrdxとraxを合わせたものを128bit整数とみなし、
             // 引数のレジスタの64ビット整数で割って、商がraxに、余りがrdxにセットされる
+            break;
+        case ND_EQ:
+            printf("  cmp rax, rdi\n");
+            printf("  sete al\n");
+            printf("  movzb rax, al\n");
+            break;
+        case ND_NE:
+            printf("  cmp rax, rdi\n");
+            printf("  setne al\n");
+            printf("  movzb rax, al\n");
+            break;
+        case ND_LT:
+            printf("  cmp rax, rdi\n");
+            printf("  setl al\n");
+            printf("  movzb rax, al\n");
+            break;
+        case ND_LE:
+            printf("  cmp rax, rdi\n");
+            printf("  setle al\n");
+            printf("  movzb rax, al\n");
             break;
     }
 
